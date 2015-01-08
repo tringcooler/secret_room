@@ -29,6 +29,7 @@ var pipe_net = (function() {
 		var _trig_list = {};
 		if(!(tags instanceof Array))
 			tags = [tags];
+		//console.log('pipe:', tags, info);
 		for(var i = 0; i < tags.length; i++) {
 			if(this._tag_hooks.hasOwnProperty(tags[i])) {
 				for(var j = 0; j < this._tag_hooks[tags[i]].length; j++) {
@@ -41,7 +42,7 @@ var pipe_net = (function() {
 		}
 		for(id in _trig_list) {
 			for(var i = 0; i < this._id_hooks[id].length; i++) {
-				this._id_hooks[id][i](info, _trig_list[id]);
+				this._id_hooks[id][i](info, _trig_list[id], tags);
 			}
 		}
 	};
@@ -108,7 +109,7 @@ var style_sheet = (function() {
 	};
 	style_sheet.prototype.set_rule = function() {
 		var rule = arguments[0];
-		var vargs = arguments.slice(1);
+		var vargs = Array.prototype.slice.call(arguments, 1);
 		if(typeof(rule) == 'string') {
 			rule = this.get_rule(rule);
 		}
@@ -169,11 +170,24 @@ var comp_base = (function() {
 		else
 			return $('.' + this._class + '_' + name);
 	};
-	comp_base.prototype.cr_elem = function(conf) {
+	comp_base.prototype.find_conf = function(name, conf) {
+		if(conf == undefined) conf = this._conf_intf;
+		if(conf.name == name) return conf;
+		if(conf.hasOwnProperty('chld')) {
+			for(var i = 0; i < conf.chld.length; i++) {
+				var rslt = this.find_conf(name, conf.chld[i]);
+				if(rslt) return rslt;
+			}
+		}
+	}
+	comp_base.prototype.cr_elem = function(conf, phase) {
 		var class_name = this._class + '_' + conf.name;
 		var element = $('<' + conf.elem + '>').addClass(class_name);
 		if(conf.hasOwnProperty('text'))
 			element.text(conf.text);
+		if(conf.hasOwnProperty('clas')) {
+			element.addClass(conf.clas);
+		}
 		if(conf.hasOwnProperty('attr')) {
 			for(var e in conf.attr) {
 				element.attr(e, conf.attr[e]);
@@ -196,8 +210,11 @@ var comp_base = (function() {
 		}
 		if(conf.hasOwnProperty('chld')) {
 			for(var i = 0; i < conf.chld.length; i++) {
-				element.append(this.cr_elem(conf.chld[i]));
+				element.append(this.cr_elem(conf.chld[i], phase));
 			}
+		}
+		if(conf.hasOwnProperty('phas')) {
+			if(phase != conf.phas) return undefined;
 		}
 		return element;
 	};
@@ -233,19 +250,22 @@ var comp_chat = (function(_super) {
 			},
 			"chld": [{
 				"name": "font_sys",
-				"elem": "!--font_sys--",
+				"elem": "p",
+				"phas": "manual",
 				"styl": {
 					"color": "grey",
 				},
 			}, {
 				"name": "font_net",
-				"elem": "!--font_net--",
+				"elem": "p",
+				"phas": "manual",
 				"styl": {
 					"color": "red",
 				},
 			}, {
 				"name": "font_self",
-				"elem": "!--font_self--",
+				"elem": "p",
+				"phas": "manual",
 				"styl": {
 					"color": "blue",
 				},
@@ -275,8 +295,8 @@ var comp_chat = (function(_super) {
 	};
 	comp_chat.prototype._tag2font = {
 		"peer_connect_info": "font_sys",
-		"chat_recv": "font_net",
-		"chat_send": "font_self",
+		"peerrecv_chat": "font_net",
+		"peersend_chat": "font_self",
 	};
 	comp_chat.prototype._init = function() {
 		var _this = this;
@@ -286,7 +306,7 @@ var comp_chat = (function(_super) {
 			e.preventDefault();
 			var msg = $('#chat_input').val();
 			if(!msg) return;
-			_this.pipe.send(msg, 'chat_send');
+			_this.pipe.send(msg, ['peersend_chat', 'peer_send', 'peerid_all']);
 			$('#chat_input').val('');
 			$('#chat_input').focus();
 		});
@@ -301,7 +321,11 @@ var comp_chat = (function(_super) {
 		var d = $("#chat_console");
 		var scrl2bot = false;
 		if(d.scrollTop() == d[0].scrollHeight - d.height()) scrl2bot = true;
-		d.append(this.to_elem(font, $('<p>').text(info.toString())));
+		d.append(
+			this.to_elem(font, $('<p>'))
+			/*this.cr_elem(this.find_conf(font), 'manual')*/
+			.text(info.toString())
+		);
 		if(scrl2bot) this.scroll_to_bottom();
 	}
 	comp_chat.prototype.recv_cb = function(info, tags) {
@@ -315,7 +339,7 @@ var comp_peer = (function(_super) {
 	function comp_peer(sheet, pipe) {
 		_super.call(this, sheet);
 		this.pipe = pipe;
-		this._peer_init();
+		this._init();
 	}
 	comp_peer.prototype._class = 'comp_peer';
 	comp_peer.prototype._conf_intf = {
@@ -325,6 +349,17 @@ var comp_peer = (function(_super) {
 			"name": "setting",
 			"elem": "div",
 			"chld": [{
+				"name": "setting_title",
+				"elem": "span",
+				"text": "Username :"
+			}, {
+				"name": "setting_input",
+				"elem": "input",
+				"attr": {
+					"id": "peer_username",
+					"value": "Player",
+				},
+			}, {
 				"name": "setting_title",
 				"elem": "span",
 				"text": "Host ID :"
@@ -343,13 +378,13 @@ var comp_peer = (function(_super) {
 				"elem": "span",
 				"text": "Dest ID :"
 			}, {
-				"name": "dest_id",
+				"name": "setting_input",
 				"elem": "input",
 				"attr": {
 					"id": "peer_dest_id",
 				},
 			}, {
-				"name": "post_button",
+				"name": "connect_button",
 				"elem": "input",
 				"attr": {
 					"id": "peer_connect",
@@ -359,45 +394,141 @@ var comp_peer = (function(_super) {
 			}]
 		}]
 	};
-	comp_peer.prototype._peer_init = function() {
-		var _this = this;
+	comp_peer.prototype._init = function() {
+		this.conns = {};
 		this.peer = new Peer({
 			key: '9lay1kbtfpvf5hfr',
 			debug: 3,
-			logFunction: function() {
+			logFunction: (function() {
 				var copy = Array.prototype.slice.call(arguments).join(' ');
-				_this.pipe.send(copy, 'peer_debug_info');
-			},
+				this.pipe.send(copy, 'peer_debug_info');
+			}).bind(this),
 			config: {'iceServers': [
 				{ url: 'stun:stun.stunprotocol.org:3478' }
 			]}
 		});
-		this.peer.on('open', function(id){
+		this.peer.on('open', (function(id) {
+			this.peer_id = id;
 			$('#peer_host_id').text(id);
+		}).bind(this));
+		this.peer.on('error', this._error);
+		this.peer.on('connection', (function(c) {
+			c.on('open', (function() {
+				this._connect(c);
+				this.send_token(c, 'rename', $('#peer_username', this.element).val());
+				
+			}).bind(this));
+		}).bind(this));
+		$('#peer_connect', this.element).click((function() {
+			var peer_id = $('#peer_dest_id', this.element).val();
+			var username = $('#peer_username', this.element).val();
+			if(this.conns.hasOwnProperty(peer_id)) return;
+			var c = this.peer.connect(peer_id, {
+				"metadata": username,
+				"serialization": "json",
+			});
+			c.on('open', (function() {
+				this._connect(c);
+			}).bind(this));
+		}).bind(this));
+		this.pipe.reg(this._send.bind(this), 'peer_pipe');
+		this.pipe.add_tags('peer_pipe', 'peer_send');
+	};
+	comp_peer.prototype._connect = function(c) {
+		var peer_id = c.peer;
+		if(this.conns.hasOwnProperty(peer_id)) return this._error('duplicate connection');
+		var username = c.metadata;
+		c.on('data', this._recv.bind(this));
+		c.on('close', (function() {
+			this._close(peer_id);
+		}).bind(this));
+		c.on('error', this._error);
+		var conn_elem = this.to_elem('connect_button', $('<input>')).attr({
+			"type": "button",
+			"value": username,
+		}).data({
+			"peer_id": peer_id,
+			"connect": c
+		}).click(function() {
+			$(this).data().connect.close();
 		});
-		this.peer.on('connection', connect);
-		function connect(c) {
-			$('#peer_dest_id').val(c.peer).attr('readonly', 'readonly');
-			_this.pipe.send('connected to ' + c.peer, 'peer_connect_info');
-			c.on('data', function(data) {
-				_this.pipe.send(data, 'chat_recv');
-			});
-			c.on('close', function() {
-				_this.pipe.send('disconnected with ' + c.peer, 'peer_connect_info');
-			});
+		$('#peer_dest_id').before(conn_elem);
+		$('#peer_dest_id').val('');
+		this.conns[peer_id] = {
+			"username": username,
+			"connect": c,
+			"element": conn_elem,
 		};
-		$('#peer_connect', this.element).click(function() {
-			var c = _this.peer.connect($('#peer_dest_id', this.element).val());
-			c.on('open', function() {
-				connect(c);
-			});
-			c.on('error', function(err) { alert(err);});
+		this.pipe.send('connected to ' + peer_id, 'peer_connect_info');
+	};
+	comp_peer.prototype._send = function(info, pure_tags, tags) {
+		var pids = [];
+		var pids_scan = true;
+		tags.splice(tags.indexOf('peer_send'), 1);
+		for(var i = 0; i < tags.length; i++) {
+			var _tagcheck = tags[i].split('_');
+			if(pids_scan && _tagcheck[0] == 'peerid') {
+				tags.splice(i--, 1);
+				if(_tagcheck[1] == 'all') {
+					pids = Object.keys(this.conns);
+					pids_scan = false;
+				} else {
+					pids.push(_tagcheck[1]);
+				}
+			} else if(_tagcheck[0] == 'peersend') {
+				_tagcheck[0] = 'peerrecv';
+				tags[i] = _tagcheck.join('_');
+			}
+		}
+		var data = {
+			"tags": tags,
+			"payload": info,
+		};
+		for(var i = 0; i < pids.length; i++) {
+			var conn = this.conns[pids[i]];
+			conn.connect.send(data);
+		}
+	};
+	comp_peer.prototype._recv = function(data) {
+		var tags = data.tags;
+		if(tags == '__token__') return this._token(data.payload);
+		tags.push('peer_recv');
+		this.pipe.send(data.payload, tags);
+	};
+	comp_peer.prototype.send_token = function() {
+		var c = arguments[0];
+		var cmd = arguments[1];
+		var vargs = Array.prototype.slice.call(arguments, 2);
+		var data = {
+			"cmd": cmd,
+			"dst_pid": c.peer,
+			"src_pid": this.peer_id,
+			"args": vargs,
+		};
+		c.send({
+			"tags": '__token__',
+			"payload": data,
 		});
-		this.pipe.reg(function(info, tags) {
-			var c = _this.peer.connections[$('#peer_dest_id').val()][0];
-			c.send(info);
-		}, 'peer_pipe');
-		this.pipe.add_tags('peer_pipe', 'chat_send');
+	};
+	comp_peer.prototype._token = function(data) {
+		switch(data.cmd) {
+			case 'rename':
+				this.conns[data.src_pid].username = data.args[0];
+				this.conns[data.src_pid].element.attr('value', data.args[0]);
+				break;
+			default:
+				break;
+		}
+	};
+	comp_peer.prototype._close = function(peer_id) {
+		var username = this.conns[peer_id].username;
+		this.conns[peer_id].element.remove();
+		delete this.conns[peer_id];
+		this.pipe.send('disconnected to ' + username + ': ' + peer_id, 'peer_connect_info');
+	};
+	comp_peer.prototype._error = function(err) {
+		alert(err);
+		//console.log('Error', this, err);
 	};
 	return comp_peer;
 })(comp_base);
