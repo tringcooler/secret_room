@@ -86,6 +86,16 @@ var pipe_net = (function() {
 		}
 		delete this._id_hooks[id];
 	};
+	pipe_net.prototype.quick = function(info, req_tags, resp_tags) {
+		var _rslt;
+		var _pipeid = this.reg(function(info, tags, src_tags){
+			_rslt = [info, tags, src_tags];
+		});
+		this.add_tags(_pipeid, resp_tags);
+		this.send(info, req_tags);
+		this.unreg(_pipeid);
+		return _rslt;
+	}
 	return pipe_net;
 })();
 
@@ -304,21 +314,21 @@ var comp_chat = (function(_super) {
 		this.pipe.add_tags('chat_pipe', Object.keys(this._tag2font));
 		$('#chat_sendbox', this.element).submit(function(e) {
 			e.preventDefault();
-			var msg = $('#chat_input').val();
+			var msg = $('#chat_input', _this.element).val();
 			if(!msg) return;
-			_this.pipe.send(msg, ['peersend_chat', 'peer_send', 'peerid_all']);
-			$('#chat_input').val('');
-			$('#chat_input').focus();
+			_this.send(msg);
+			$('#chat_input', _this.element).val('');
+			$('#chat_input', _this.element).focus();
 		});
 	}
 	comp_chat.prototype.scroll_to_bottom = function() {
-		var d = $("#chat_console");
+		var d = $("#chat_console", this.element);
 		var b = d[0].scrollHeight - d.height();
 		if(d.scrollTop() < b)
 			d.animate({ scrollTop: b}, 200);
 	};
 	comp_chat.prototype.print = function(info, font) {
-		var d = $("#chat_console");
+		var d = $("#chat_console", this.element);
 		var scrl2bot = false;
 		if(d.scrollTop() == d[0].scrollHeight - d.height()) scrl2bot = true;
 		d.append(
@@ -328,11 +338,36 @@ var comp_chat = (function(_super) {
 		);
 		if(scrl2bot) this.scroll_to_bottom();
 	}
+	comp_chat.prototype.send = function(msg) {
+		this.pipe.send(msg, ['peersend_chat', 'peer_send', 'peerid_all']);
+	};
 	comp_chat.prototype.recv_cb = function(info, tags) {
 		this.print(info, this._tag2font[tags[0]]);
 	};
 	return comp_chat;
 })(comp_base);
+
+var comp_chat_2 = (function(_super) {
+	__extends(comp_chat_2, _super);
+	function comp_chat_2(sheet, pipe) {
+		_super.call(this, sheet, pipe);
+		this.username = undefined;
+	}
+	comp_chat_2.prototype.send = function(msg) {
+		if(!this.username)
+			this.username = this.pipe.quick({"cmd":"username"}, 'peer_cmd', 'peer_cmd_result')[0];
+		this.pipe.send({
+			"username": this.username,
+			"msg": msg,
+		}, ['peersend_chat', 'peer_send', 'peerid_all']);
+	};
+	comp_chat_2.prototype.recv_cb = function(info, tags) {
+		if(tags[0] != 'peer_connect_info')
+			info = info.username + ': ' + info.msg;
+		this.print(info, this._tag2font[tags[0]]);
+	};
+	return comp_chat_2;
+})(comp_chat);
 
 var comp_peer = (function(_super) {
 	__extends(comp_peer, _super);
@@ -390,6 +425,7 @@ var comp_peer = (function(_super) {
 					"id": "peer_connect",
 					"type": "button",
 					"value": "connect",
+					"disabled": "disabled",
 				},
 			}]
 		}]
@@ -409,19 +445,20 @@ var comp_peer = (function(_super) {
 		});
 		this.peer.on('open', (function(id) {
 			this.peer_id = id;
-			$('#peer_host_id').text(id);
+			$('#peer_host_id', this.element).text(id);
+			$('#peer_connect').removeAttr('disabled');
 		}).bind(this));
 		this.peer.on('error', this._error);
 		this.peer.on('connection', (function(c) {
 			c.on('open', (function() {
 				this._connect(c);
-				this.send_token(c, 'rename', $('#peer_username', this.element).val());
+				this.send_token(c, 'rename', this.peer_id, this.username());
 				
 			}).bind(this));
 		}).bind(this));
 		$('#peer_connect', this.element).click((function() {
 			var peer_id = $('#peer_dest_id', this.element).val();
-			var username = $('#peer_username', this.element).val();
+			var username = this.username();
 			if(this.conns.hasOwnProperty(peer_id)) return;
 			var c = this.peer.connect(peer_id, {
 				"metadata": username,
@@ -433,6 +470,18 @@ var comp_peer = (function(_super) {
 		}).bind(this));
 		this.pipe.reg(this._send.bind(this), 'peer_pipe');
 		this.pipe.add_tags('peer_pipe', 'peer_send');
+		this.pipe.reg(this._token_cb.bind(this), 'peer_cmd_pipe');
+		this.pipe.add_tags('peer_cmd_pipe', 'peer_cmd');
+	};
+	comp_peer.prototype.pids = function() {
+		return Object.keys(this.conns);
+	};
+	comp_peer.prototype.username = function(pid) {
+		if(pid) {
+			return this.conns[pid].username;
+		} else {
+			return $('#peer_username', this.element).attr('readonly', 'readonly').val();
+		}
 	};
 	comp_peer.prototype._connect = function(c) {
 		var peer_id = c.peer;
@@ -452,8 +501,8 @@ var comp_peer = (function(_super) {
 		}).click(function() {
 			$(this).data().connect.close();
 		});
-		$('#peer_dest_id').before(conn_elem);
-		$('#peer_dest_id').val('');
+		$('#peer_dest_id', this.element).before(conn_elem);
+		$('#peer_dest_id', this.element).val('');
 		this.conns[peer_id] = {
 			"username": username,
 			"connect": c,
@@ -501,8 +550,6 @@ var comp_peer = (function(_super) {
 		var vargs = Array.prototype.slice.call(arguments, 2);
 		var data = {
 			"cmd": cmd,
-			"dst_pid": c.peer,
-			"src_pid": this.peer_id,
 			"args": vargs,
 		};
 		c.send({
@@ -511,14 +558,23 @@ var comp_peer = (function(_super) {
 		});
 	};
 	comp_peer.prototype._token = function(data) {
+		var rslt;
 		switch(data.cmd) {
 			case 'rename':
-				this.conns[data.src_pid].username = data.args[0];
-				this.conns[data.src_pid].element.attr('value', data.args[0]);
+				/* rename: peer_id, username */
+				this.conns[data.args[0]].username = data.args[1];
+				this.conns[data.args[0]].element.attr('value', data.args[1]);
+				break;
+			case 'username':
+				rslt = this.username();
 				break;
 			default:
 				break;
 		}
+		return rslt;
+	};
+	comp_peer.prototype._token_cb = function(info, pure_tags, all_tags) {
+		this.pipe.send(this._token(info), 'peer_cmd_result');
 	};
 	comp_peer.prototype._close = function(peer_id) {
 		var username = this.conns[peer_id].username;
@@ -538,7 +594,7 @@ $(document).ready(function() {
 	var sht = new style_sheet();
 	var pipe = new pipe_net();
 	var obj1 = new comp_peer(sht, pipe);
-	var obj2 = new comp_chat(sht, pipe);
+	var obj2 = new comp_chat_2(sht, pipe);
 	$('body').append(obj1.element).append(obj2.element);
 	console.log('done');
 });
