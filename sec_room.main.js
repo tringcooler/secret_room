@@ -178,7 +178,7 @@ var comp_base = (function() {
 		if(elem)
 			return elem.addClass(this._class + '_' + name);
 		else
-			return $('.' + this._class + '_' + name);
+			return $('.' + this._class + '_' + name, this.element);
 	};
 	comp_base.prototype.find_conf = function(name, conf) {
 		if(conf == undefined) conf = this._conf_intf;
@@ -192,7 +192,12 @@ var comp_base = (function() {
 	}
 	comp_base.prototype.cr_elem = function(conf, phase) {
 		var class_name = this._class + '_' + conf.name;
-		var element = $('<' + conf.elem + '>').addClass(class_name);
+		var element;
+		if(conf.hasOwnProperty('nspc'))
+			element = $(document.createElementNS(conf.nspc, conf.elem));
+		else
+			element = $('<' + conf.elem + '>');
+		element.addClass(class_name);
 		if(conf.hasOwnProperty('text'))
 			element.text(conf.text);
 		if(conf.hasOwnProperty('clas')) {
@@ -595,6 +600,7 @@ $(document).ready(function() {
 	var pipe = new pipe_net();
 	var obj1 = new comp_peer(sht, pipe);
 	var obj2 = new comp_chat_2(sht, pipe);
-	$('body').append(obj1.element).append(obj2.element);
+	var obj3 = new game_go(sht, pipe);
+	$('body').append(obj1.element).append(obj2.element.css('float', 'right')).append(obj3.element);
 	console.log('done');
 });
