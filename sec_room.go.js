@@ -154,6 +154,10 @@ var core_go = (function() {
 		this.info_cur_lvl = 'detail';
 		this._logs = [];
 		this._ko_pos = null;
+		this._capture = {
+			'black': 0,
+			'white': 0,
+		}
 		this._stat_empty = new this._stat_chain({
 			'stone': 'empty',
 		});
@@ -178,7 +182,7 @@ var core_go = (function() {
 			return this._next && this._next.tail() || this;
 		};
 		_stat_chain.prototype.merge = function(c) {
-			this._next = c;
+			this.tail()._next = c;
 		};
 		_stat_chain.prototype.cut = function() {
 			this._next = null;
@@ -207,129 +211,185 @@ var core_go = (function() {
 			default:
 				return 'empty';
 		}
-	}
+	};
+	core_go.prototype._concat_pos = function(d, s) {
+		var c = 0;
+		if((s instanceof Array) && (typeof(s[0]) == 'number')) s = [s];
+		for(var i = 0; i < s.length; i++) {
+			var x = s[i][0], y = s[i][1];
+			for(var j = 0; j < d.length; j++) {
+				if(d[j][0] == x && d[j][1] == y) break;
+			}
+			if(j == d.length) {
+				d.push(s[i]);
+				c++;
+			}
+		}
+		return c;
+	};
+	core_go.prototype._remove_pos = function(d, s) {
+		var c = 0;
+		if((s instanceof Array) && (typeof(s[0]) == 'number')) s = [s];
+		for(var i = 0; i < s.length; i++) {
+			var x = s[i][0], y = s[i][1];
+			for(var j = 0; j < d.length; j++) {
+				if(d[j][0] == x && d[j][1] == y) {
+					d.splice(j, 1);
+					c++;
+					break;
+				}
+			}
+		}
+		return c;
+	};
+	core_go.prototype._remove_pos_idx = function(d, r) {
+		for(var i = d.length - 1; i > -1; i--) {
+			if(d[i][0] == r[0] && d[i][1] == r[1]) {
+				d.splice(i, 1);
+				break;
+			}
+		}
+		return i;
+	};
+	core_go.prototype._remove_pos_safe = function(s, r) {
+		var d = [];
+		if((r instanceof Array) && (typeof(r[0]) == 'number')) r = [r];
+		for(var i = 0; i < s.length; i++) {
+			var x = s[i][0], y = s[i][1];
+			for(var j = 0; j < r.length; j++) {
+				if(r[j][0] == x && r[j][1] == y) break;
+			}
+			if(j == r.length) {
+				d.push(s[i]);
+			}
+		}
+		return d;
+	};
 	core_go.prototype._set = function(pos, stn) {
 		var cur_stat = this._tbl[pos[0]][pos[1]];
 		if(cur_stat.val().stone != 'empty') return this._illegal('Already has a stone here.');
 		if(this._ko_pos && this._ko_pos[0] == pos[0] && this._ko_pos[1] == pos[1]) return this._illegal('Ko.');
-		this._ko_pos = null;
-		var ko_check = true;
 		var log = {
 			"pos": pos,
 			"stone": stn,
 			"prev_stat": cur_stat,
-			"liberties": 0,
 			"group_len": 0,
+			"liberties_len": 0,
 			"merge_tl": [],
-			"weaken_vl": [],
+			"weaken_vli": [],
 			"free_vl": [],
 			"capture": [],
+			"ko": this._ko_pos,
 		};
-		var liberties = 0;
+		var ko_check = true;
+		this._ko_pos = null;
+		var liberties = [];
 		var capture_st = [];
 		cur_stat = null;
 		var _check = (function(posx, posy) {
 			var _st = this._tbl[posx][posy];
 			var _stn = _st.val().stone;
 			if(_stn == 'empty') {
-				liberties++;
+				this._concat_pos(liberties, [posx, posy]);
 			} else if ( _stn == stn) {
 				if(cur_stat) {
-					log.liberties += _st.val().liberties - 1;
-					cur_stat.val().liberties += _st.val().liberties - 1;
-					log.group_len += _st.val().group.length;
-					cur_stat.val().group = cur_stat.val().group.concat(_st.val().group);
-					log.merge_tl.push(_st.tail());
-					_st.merge(cur_stat);
+					if(cur_stat.tail() != _st.tail()) {
+						log.group_len += this._concat_pos(cur_stat.val().group, _st.val().group);
+						log.liberties_len += this._concat_pos(cur_stat.val().liberties, _st.val().liberties);
+						log.merge_tl.push(_st.tail());
+						_st.merge(cur_stat);
+					}
 				} else {
 					cur_stat = _st;
-					log.liberties--;
-					cur_stat.val().liberties--;
-					log.group_len++;
-					cur_stat.val().group.push(pos);
+					log.group_len += this._concat_pos(cur_stat.val().group, pos);
 				}
 			} else {
-				log.weaken_vl.push(_st.val());
-				_st.val().liberties--;
-				if(_st.val().liberties == 0) {
-					capture_st.push(_st);
+				var _ri;
+				if((_ri = this._remove_pos_idx(_st.val().liberties, pos)) > -1) {
+					log.weaken_vli.push([_st.val(), _ri]);
+					if(_st.val().liberties.length == 0) {
+						capture_st.push(_st);
+					}
+					this._info('info', 'Weaken', [posx, posy], 'to', _st.val().liberties.length, 'liberties');
 				}
-				this._info('info', 'Weaken', [posx, posy], 'to', _st.val().liberties, 'liberties');
 			}
 		}).bind(this);
 		this._info('info', 'Set', pos, ':', stn);
 		if(pos[0] > 0) _check(pos[0] - 1, pos[1]);
-		if(pos[0] < this.size) _check(pos[0] + 1, pos[1]);
+		if(pos[0] < this.size - 1) _check(pos[0] + 1, pos[1]);
 		if(pos[1] > 0) _check(pos[0], pos[1] - 1);
-		if(pos[1] < this.size) _check(pos[0], pos[1] + 1);
+		if(pos[1] < this.size - 1) _check(pos[0], pos[1] + 1);
 		if(!cur_stat) {
 			cur_stat = new this._stat_chain({
 				'stone': stn,
-				'liberties': 0,
+				'liberties': [],
 				'group': [pos],
 			});
 		} else {
 			ko_check = false;
 		}
 		this._tbl[pos[0]][pos[1]] = cur_stat;
-		cur_stat.val().liberties += liberties;
-		this._info('info', pos, ':', stn, 'has', liberties, 'liberties');
+		log.liberties_len += this._concat_pos(cur_stat.val().liberties, liberties);
+		var _ri;
+		if((_ri = this._remove_pos_idx(cur_stat.val().liberties, pos)) > -1)
+			log.weaken_vli.push([cur_stat.val(), _ri]);
+		this._info('info', pos, ':', stn, 'has', cur_stat.val().liberties.length, 'liberties');
 		if(capture_st.length == 0) {
-			if(cur_stat.val().liberties == 0) {
+			if(cur_stat.val().liberties.length == 0) {
 				this._undo(log);
 				return this._illegal('Self-capture.');
 			}
 		} else {
 			for(var i = 0; i < capture_st.length; i++) {
-				log.capture = log.capture.concat(capture_st[i].val().group);
+				this._concat_pos(log.capture, capture_st[i].val().group);
 			}
 			if(ko_check && log.capture.length == 1) {
 				this._info('info', 'Ko', log.capture[0]);
 				this._ko_pos = log.capture[0];
 			}
-			var _calc_lib = (function(s_posx, s_posy, d_posx, d_posy) {
-				var s = this._tbl[s_posx][s_posy];
+			var _free_lib = (function(pos, d_posx, d_posy) {
+				var s = this._tbl[pos[0]][pos[1]];
 				var d = this._tbl[d_posx][d_posy];
-				if(d.val().stone != 'empty' && d.val().stone != s.val().stone)
-					_lib_free.push([d, d.val().liberties + 1]);
+				if(d.val().stone != 'empty' && d.val().stone != s.val().stone) {
+					if(this._concat_pos(d.val().liberties, pos) > 0)
+						log.free_vl.push(d.val());
+				}
 			}).bind(this);
 			for(var i = 0; i < log.capture.length; i++) {
-				var _lib_free = [];
 				var posc = log.capture[i];
 				this._info('info', 'Capture', posc);
-				if(posc[0] > 0) _calc_lib(posc[0], posc[1], posc[0] - 1, posc[1]);
-				if(posc[0] < this.size) _calc_lib(posc[0], posc[1], posc[0] + 1, posc[1]);
-				if(posc[1] > 0) _calc_lib(posc[0], posc[1], posc[0], posc[1] - 1);
-				if(posc[1] < this.size) _calc_lib(posc[0], posc[1], posc[0], posc[1] + 1);
-				for(var j = 0; j < _lib_free.length; j++) {
-					if(_lib_free[j][0].val().liberties < _lib_free[j][1]) {
-						log.free_vl.push(_lib_free[j][0].val());
-						_lib_free[j][0].val().liberties++;
-					}
-				}
+				if(posc[0] > 0) _free_lib(posc, posc[0] - 1, posc[1]);
+				if(posc[0] < this.size - 1) _free_lib(posc, posc[0] + 1, posc[1]);
+				if(posc[1] > 0) _free_lib(posc, posc[0], posc[1] - 1);
+				if(posc[1] < this.size - 1) _free_lib(posc, posc[0], posc[1] + 1);
 			}
 			for(var i = 0; i < capture_st.length; i++) {
 				log.merge_tl.push(capture_st[i].tail());
 				capture_st[i].merge(this._stat_empty);
 			}
+			this._capture[stn] += log.capture.length;
 		}
 		return log;
 	};
 	core_go.prototype._undo = function(log) {
 		this._info('info', 'undo', log.pos, ':', log.stone);
-		var cur_stat = this._tbl[pos[0]][pos[1]];
-		for(var i = 1; i < log.merge_tl.length; i++) {
+		var cur_stat_val = this._tbl[log.pos[0]][log.pos[1]].val();
+		for(var i = 0; i < log.merge_tl.length; i++) {
 			log.merge_tl[i].cut();
 		}
-		for(var i = 1; i < log.free_vl.length; i++) {
-			log.free_vl[i].liberties--;
+		for(var i = 0; i < log.free_vl.length; i++) {
+			log.free_vl[i].liberties.pop();
 		}
-		for(var i = 1; i < log.weaken_vl.length; i++) {
-			log.weaken_vl[i].liberties++;
+		for(var i = 0; i < log.weaken_vli.length; i++) {
+			log.weaken_vli[i][0].liberties.splice(log.weaken_vli[i][1], 0, log.pos);
 		}
-		cur_stat.group = cur_stat.group.slice(0, - log.group_len);
-		cur_stat.liberties -= log.liberties;
-		this._tbl[pos[0]][pos[1]] = log.prev_stat;
+		if(log.liberties_len > 0)
+			cur_stat_val.liberties = cur_stat_val.liberties.slice(0, - log.liberties_len);
+		if(log.group_len > 0)
+			cur_stat_val.group = cur_stat_val.group.slice(0, - log.group_len);
+		this._tbl[log.pos[0]][log.pos[1]] = log.prev_stat;
+		this._capture[log.stone] -= log.capture.length;
+		this._ko_pos = log.ko;
 	};
 	core_go.prototype.cmd = function() {
 		var rslt = null;
