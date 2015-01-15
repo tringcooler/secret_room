@@ -4,8 +4,9 @@ var game_go = (function(_super) {
 	function game_go(sheet, pipe) {
 		_super.call(this, sheet);
 		this.pipe = pipe;
-		this.core = new core_go(9, this._draw_stone.bind(this));
-		this._game_init(9);
+		$('#start_game', this.element).click(this._start.bind(this));
+		$('#go_pass', this.element).click(this._pass.bind(this));
+		$('#go_undo', this.element).click(this._undo.bind(this));
 	}
 	var board_size = 500;
 	var board_margin = 30;
@@ -51,17 +52,119 @@ var game_go = (function(_super) {
 			"name": "ctrl_panel",
 			"elem": "div",
 			"chld": [{
-				"name": "pannel_title",
-				"elem": "p",
-				"text": "control",
-			}],
-		}, {
-			"name": "info_panel",
-			"elem": "div",
-			"chld": [{
-				"name": "pannel_title",
-				"elem": "p",
-				"text": "info",
+				"name": "div",
+				"elem": "div",
+				"chld": [{
+					"name": "span",
+					"elem": "span",
+					"text": "Black:",
+				}, {
+					"name": "input",
+					"elem": "input",
+					"attr": {
+						"id": "player_black",
+						"type": "radio",
+						"name": "player",
+						"checked": "checked",
+					},
+				}, {
+					"name": "span",
+					"elem": "span",
+					"text": "White:",
+				}, {
+					"name": "input",
+					"elem": "input",
+					"attr": {
+						"id": "player_white",
+						"type": "radio",
+						"name": "player",
+					},
+				}],
+			}, {
+				"name": "ctrl_ready",
+				"elem": "div",
+				"styl": {
+					"display": "block",
+				},
+				"chld": [{
+					"name": "div",
+					"elem": "div",
+					"chld": [{
+						"name": "span",
+						"elem": "span",
+						"text": "Size of board:",
+					}, {
+						"name": "input",
+						"elem": "input",
+						"attr": {
+							"id": "board_size",
+							"value": 9,
+						},
+					}],
+				}, {
+					"name": "button",
+					"elem": "input",
+					"attr": {
+						"id": "start_game",
+						"value": "Start Game",
+						"type": "button",
+					},
+				}],
+			}, {
+				"name": "ctrl_game",
+				"elem": "div",
+				"styl": {
+					"display": "none",
+				},
+				"chld": [{
+					"name": "div",
+					"elem": "div",
+					"chld": [{
+						"name": "span",
+						"elem": "span",
+						"text": "Black Capture:",
+					}, {
+						"name": "span",
+						"elem": "span",
+						"attr": {
+							"id": "capture_black",
+						},
+					}],
+				}, {
+					"name": "div",
+					"elem": "div",
+					"chld": [{
+						"name": "span",
+						"elem": "span",
+						"text": "White Capture:",
+					}, {
+						"name": "span",
+						"elem": "span",
+						"attr": {
+							"id": "capture_white",
+						},
+					}],
+				}, {
+					"name": "div",
+					"elem": "div",
+					"chld": [{
+						"name": "button",
+						"elem": "input",
+						"attr": {
+							"id": "go_pass",
+							"value": "Pass",
+							"type": "button",
+						},
+					}, {
+						"name": "button",
+						"elem": "input",
+						"attr": {
+							"id": "go_undo",
+							"value": "Undo",
+							"type": "button",
+						},
+					}],
+				}],
 			}],
 		}],
 	};
@@ -78,11 +181,11 @@ var game_go = (function(_super) {
 		};
 		this.setting.last = this.setting.first + this.setting.dist * (this.setting.size - 1);
 		this._draw_bg();
-		this.player = 'black';
-		$('#board', this.element).click(this._on_click.bind(this));
 		/*  errata workaround for a bug only on my browser */
 		(function(a,b){a(function(){b(0, 0, 1, 1);a(function(){b(0, 0, 1, 1);});});})
 		(requestAnimationFrame, this.canvas.stone.clearRect.bind(this.canvas.stone));
+		$('#board', this.element).click(this._on_click.bind(this));
+		this.core = new core_go(size, this._draw_stone.bind(this));
 	};
 	game_go.prototype._tst = function() {
 		if(!this._tst_idx) this._tst_idx = 0;
@@ -101,6 +204,27 @@ var game_go = (function(_super) {
 		//this._draw_stone([0, 1], 'white');
 		//this._draw_stone([1, 1], 'white');
 		//this._draw_stone([1, 1], 'empty');
+	};
+	game_go.prototype.player = function(p) {
+		if(p) {
+			p == 'black'
+			&& $('#player_black', this.element).prop('checked', true)
+			|| $('#player_white', this.element).prop('checked', true);
+			return p;
+		} else {
+			return $('#player_black', this.element).prop('checked') && 'black' || 'white';
+		}
+	};
+	game_go.prototype.player_swap = function() {
+		$('#player_black', this.element).prop('checked')
+		&& $('#player_white', this.element).prop('checked', true)
+		|| $('#player_black', this.element).prop('checked', true);
+	};
+	game_go.prototype.update_capture = function() {
+		if(this.core) {
+			$('#capture_black', this.element).text(this.core._capture.white);
+			$('#capture_white', this.element).text(this.core._capture.black);
+		}
 	};
 	game_go.prototype._draw_bg = function() {
 		var c = this.canvas.bg;
@@ -134,14 +258,30 @@ var game_go = (function(_super) {
 		}
 		//console.log('draw', pos, stn);
 	};
+	game_go.prototype._start = function() {
+		this.style('ctrl_ready').set_style('display', 'none');
+		this.style('ctrl_game').set_style('display', 'block');
+		this._game_init($('#board_size', this.element).val());
+		this.update_capture();
+	};
+	game_go.prototype._pass = function() {
+		this.player_swap();
+	};
+	game_go.prototype._undo = function() {
+		var stone = this.core.cmd('undo');
+		if(stone) {
+			this.player(stone);
+			this.update_capture();
+		};
+	};
 	game_go.prototype._on_click = function(e) {
 		var x = (((e.offsetX - this.setting.first) / this.setting.dist + 0.5) | 0);
 		var y = (((e.offsetY - this.setting.first) / this.setting.dist + 0.5) | 0);
 		x = Math.max(Math.min(x, this.setting.size - 1), 0);
 		y = Math.max(Math.min(y, this.setting.size - 1), 0);
-		if(this.core.cmd('set', this.player, [x, y])) {
-			if(this.player == 'black') this.player = 'white';
-			else this.player = 'black';
+		if(this.core.cmd('set', this.player(), [x, y])) {
+			this.player_swap();
+			this.update_capture();
 		}
 	};
 	return game_go;
@@ -415,6 +555,7 @@ var core_go = (function() {
 						this.draw(log.capture[i], this._reverse_stone(log.stone));
 					}
 					this._undo(log);
+					rslt = log.stone;
 				}
 			default:
 				break;
