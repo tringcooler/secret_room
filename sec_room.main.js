@@ -309,6 +309,7 @@ var comp_chat = (function(_super) {
 		}]
 	};
 	comp_chat.prototype._tag2font = {
+		"console_info": "font_sys",
 		"peer_connect_info": "font_sys",
 		"peerrecv_chat": "font_net",
 		"peersend_chat": "font_self",
@@ -330,7 +331,8 @@ var comp_chat = (function(_super) {
 		var d = $("#chat_console", this.element);
 		var b = d[0].scrollHeight - d.height();
 		if(d.scrollTop() < b)
-			d.animate({ scrollTop: b}, 200);
+			//d.animate({ scrollTop: b}, 200);
+			d.scrollTop(b);
 	};
 	comp_chat.prototype.print = function(info, font) {
 		var d = $("#chat_console", this.element);
@@ -367,7 +369,7 @@ var comp_chat_2 = (function(_super) {
 		}, ['peersend_chat', 'peer_send', 'peerid_all']);
 	};
 	comp_chat_2.prototype.recv_cb = function(info, tags) {
-		if(tags[0] != 'peer_connect_info')
+		if(this._tag2font[tags[0]] != 'font_sys')
 			info = info.username + ': ' + info.msg;
 		this.print(info, this._tag2font[tags[0]]);
 	};
@@ -436,6 +438,7 @@ var comp_peer = (function(_super) {
 		}]
 	};
 	comp_peer.prototype._init = function() {
+		this._lock_cb = null;
 		this.conns = {};
 		this.peer = new Peer({
 			key: '9lay1kbtfpvf5hfr',
@@ -456,9 +459,12 @@ var comp_peer = (function(_super) {
 		this.peer.on('error', this._error);
 		this.peer.on('connection', (function(c) {
 			c.on('open', (function() {
+				if(this._lock_cb) {
+					c.close();
+					return;
+				}
 				this._connect(c);
 				this.send_token(c, 'rename', this.peer_id, this.username());
-				
 			}).bind(this));
 		}).bind(this));
 		$('#peer_connect', this.element).click((function() {
@@ -573,6 +579,32 @@ var comp_peer = (function(_super) {
 			case 'username':
 				rslt = this.username();
 				break;
+			case 'unlock':
+				this._lock_cb = null;
+				$('#peer_connect', this.element).removeAttr('disabled');
+				break;
+			case 'lock':
+				/* lock: [callback] */
+				/* callback: peer_id -> false/true (unlock/not)*/
+				if(data.args && data.args[0])
+					this._lock_cb = data.args[0];
+				else
+					this._lock_cb = function(){};
+				$('#peer_connect', this.element).attr('disabled', 'disabled');
+			case 'peers':
+				rslt = {};
+				rslt.peers = {};
+				rslt.pid = this.peer_id;
+				rslt.peers[this.peer_id] = this.username();
+				rslt.cnt = 1;
+				for(var pid in this.conns) {
+					rslt.peers[pid] = this.conns[pid].username;
+					rslt.cnt++;
+				}
+				break;
+			case 'count':
+				rslt = Object.keys(this.conns).length + 1;
+				break;
 			default:
 				break;
 		}
@@ -586,6 +618,12 @@ var comp_peer = (function(_super) {
 		this.conns[peer_id].element.remove();
 		delete this.conns[peer_id];
 		this.pipe.send('disconnected to ' + username + ': ' + peer_id, 'peer_connect_info');
+		if(this._lock_cb) {
+			if(!this._lock_cb(peer_id)) {
+				this._lock_cb = null;
+				$('#peer_connect', this.element).removeAttr('disabled');
+			}
+		}
 	};
 	comp_peer.prototype._error = function(err) {
 		alert(err);
@@ -594,6 +632,7 @@ var comp_peer = (function(_super) {
 	return comp_peer;
 })(comp_base);
 
+var t;
 $(document).ready(function() {
 	console.log('ready');
 	var sht = new style_sheet();
@@ -603,4 +642,5 @@ $(document).ready(function() {
 	var obj3 = new game_go(sht, pipe);
 	$('body').append(obj1.element).append(obj2.element.css('float', 'right')).append(obj3.element);
 	console.log('done');
+	t = obj3;
 });
