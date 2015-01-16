@@ -305,6 +305,7 @@ var game_go = (function(_super) {
 			this.player('black');
 		} else {
 			this._strict = false;
+			this.player('black');
 		}
 		this._game_init($('#board_size', this.element).val());
 		this.update_capture();
