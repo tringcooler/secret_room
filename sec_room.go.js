@@ -7,6 +7,8 @@ var game_go = (function(_super) {
 		$('#start_game', this.element).click(this._start.bind(this));
 		$('#go_pass', this.element).click(this._pass.bind(this));
 		$('#go_undo', this.element).click(this._undo.bind(this));
+		this.pipe.reg(this._cmd_cb.bind(this), 'go_cmd_channel');
+		this.pipe.add_tags('go_cmd_channel', 'peerrecv_go_cmd');
 	}
 	var board_size = 500;
 	var board_margin = 30;
@@ -59,7 +61,7 @@ var game_go = (function(_super) {
 					"elem": "span",
 					"text": "Black:",
 				}, {
-					"name": "input",
+					"name": "radio",
 					"elem": "input",
 					"attr": {
 						"id": "player_black",
@@ -72,7 +74,7 @@ var game_go = (function(_super) {
 					"elem": "span",
 					"text": "White:",
 				}, {
-					"name": "input",
+					"name": "radio",
 					"elem": "input",
 					"attr": {
 						"id": "player_white",
@@ -94,11 +96,28 @@ var game_go = (function(_super) {
 						"elem": "span",
 						"text": "Size of board:",
 					}, {
-						"name": "input",
+						"name": "gamesize",
 						"elem": "input",
 						"attr": {
 							"id": "board_size",
 							"value": 9,
+						},
+						"styl": {
+							"width": "20px",
+							"text-align": "right",
+						},
+					}, {
+						"name": "span",
+						"elem": "span",
+						"text": "Strict mode:",
+					}, {
+						"name": "checkbox",
+						"elem": "input",
+						"attr": {
+							"id": "strict_mode",
+							"type": "checkbox",
+							"name": "strict",
+							"checked": "checked",
 						},
 					}],
 				}, {
@@ -210,16 +229,32 @@ var game_go = (function(_super) {
 			p == 'black'
 			&& $('#player_black', this.element).prop('checked', true)
 			|| $('#player_white', this.element).prop('checked', true);
+			this._player_lock(p);
 			return p;
 		} else {
 			return $('#player_black', this.element).prop('checked') && 'black' || 'white';
 		}
 	};
 	game_go.prototype.player_swap = function() {
-		$('#player_black', this.element).prop('checked')
-		&& $('#player_white', this.element).prop('checked', true)
-		|| $('#player_black', this.element).prop('checked', true);
+		if($('#player_black', this.element).prop('checked')) {
+			$('#player_white', this.element).prop('checked', true);
+			this._player_lock('white');
+		} else {
+			$('#player_black', this.element).prop('checked', true);
+			this._player_lock('black');
+		}
 	};
+	game_go.prototype._player_lock = function(player) {
+		if(this._strict) {
+			if(player == this._player) {
+				$('#go_pass', this.element).removeAttr('disabled');
+				$('#go_undo', this.element).removeAttr('disabled');
+			} else {
+				$('#go_pass', this.element).attr('disabled', 'disabled');
+				$('#go_undo', this.element).attr('disabled', 'disabled');
+			}
+		}
+	}
 	game_go.prototype.update_capture = function() {
 		if(this.core) {
 			$('#capture_black', this.element).text(this.core._capture.white);
@@ -259,22 +294,35 @@ var game_go = (function(_super) {
 		//console.log('draw', pos, stn);
 	};
 	game_go.prototype._start = function() {
+		if(!this._peer_init()) return;
 		this.style('ctrl_ready').set_style('display', 'none');
 		this.style('ctrl_game').set_style('display', 'block');
+		if($('#strict_mode', this.element).prop('checked') && this._remote) {
+			this._strict = true;
+			$('#player_black', this.element).attr('disabled', 'disabled')
+			$('#player_white', this.element).attr('disabled', 'disabled');
+			this._player = this.player();
+			this.player('black');
+		} else {
+			this._strict = false;
+		}
 		this._game_init($('#board_size', this.element).val());
 		this.update_capture();
 	};
-	game_go.prototype._pass = function() {
+	game_go.prototype._pass = function(ev) {
 		this.player_swap();
+		if(ev)this.send('pass');
 	};
-	game_go.prototype._undo = function() {
+	game_go.prototype._undo = function(ev) {
 		var stone = this.core.cmd('undo');
 		if(stone) {
 			this.player(stone);
 			this.update_capture();
+			if(ev)this.send('undo');
 		};
 	};
 	game_go.prototype._on_click = function(e) {
+		if(this._strict && this.player() != this._player) return;
 		var x = (((e.offsetX - this.setting.first) / this.setting.dist + 0.5) | 0);
 		var y = (((e.offsetY - this.setting.first) / this.setting.dist + 0.5) | 0);
 		x = Math.max(Math.min(x, this.setting.size - 1), 0);
@@ -282,6 +330,79 @@ var game_go = (function(_super) {
 		if(this.core.cmd('set', this.player(), [x, y])) {
 			this.player_swap();
 			this.update_capture();
+			this.send('set', [x, y]);
+		}
+	};
+	game_go.prototype._cmd2data = function(args) {
+		var data = {
+			"cmd": args[0],
+			"args": Array.prototype.slice.call(args, 1),
+		};
+		return data;
+	};
+	game_go.prototype._peer_cmd = function() {
+		return this.pipe.quick(this._cmd2data(arguments), 'peer_cmd', 'peer_cmd_result')[0]
+	}
+	game_go.prototype._peer_init = function() {
+		if(this._peer_cmd('count') > 2) {
+			this.pipe.send('This game is only for 2 players.', 'console_info');
+			return false;
+		}
+		peers = this._peer_cmd('lock');
+		if(peers.cnt == 1) {
+			this._remote = false;
+			return true;
+		}
+		this._remote = true;
+		this._started = true;
+		this._send_seq = 1;
+		this._recv_seq = 0;
+		this.pipe.reg(this._recv_cb.bind(this), 'go_game_channel');
+		this.pipe.add_tags('go_game_channel', 'peerrecv_go_game');
+		this.pipe.send({
+			"cmd": "start",
+			"size": $('#board_size', this.element).val(),
+			"strict": $('#strict_mode', this.element).prop('checked'),
+			"player": (this.player() == 'black' && 'white' || 'black'),
+		}, ['peersend_go_cmd', 'peerid_all', 'peer_send']);
+		return true;
+	};
+	game_go.prototype._cmd_cb = function(data, pure_tags, ext_tags) {
+		switch(data.cmd) {
+			case 'start':
+				if(!this._started) {
+					$('#board_size', this.element).val(data.size);
+					$('#strict_mode', this.element).prop('checked', data.strict);
+					this.player(data.player);
+					this._start();
+				}
+				break;
+			default:
+				break;
+		}
+	};
+	game_go.prototype.send = function() {
+		var data = this._cmd2data(arguments);
+		data.seq = this._send_seq++;
+		this.pipe.send(data, ['peersend_go_game', 'peerid_all', 'peer_send']);
+	};
+	game_go.prototype._recv_cb = function(data, pure_tags, ext_tags) {
+		if(data.seq - this._recv_seq != 1) this.pipe.send('Error: Invalid Sequence.', 'console_info');
+		this._recv_seq = data.seq;
+		switch(data.cmd) {
+			case 'set':
+				this.core.cmd('set', this.player(), data.args[0]);
+				this.player_swap();
+				this.update_capture();
+				break;
+			case 'pass':
+				this._pass();
+				break;
+			case 'undo':
+				this._undo();
+				break;
+			default:
+				break;
 		}
 	};
 	return game_go;
