@@ -448,7 +448,13 @@ var comp_peer = (function(_super) {
 				this.pipe.send(copy, 'peer_debug_info');
 			}).bind(this),
 			config: {'iceServers': [
-				{ url: 'stun:stun.stunprotocol.org:3478' }
+				{
+					"url": "stun:stun.stunprotocol.org:3478"
+				}, {
+					"url": "turn:numb.viagenie.ca:3478",
+					"username": "bsod123456@gmail.com",
+					"credential": "111111",
+				},
 			]}
 		});
 		this.peer.on('open', (function(id) {
