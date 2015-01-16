@@ -329,9 +329,9 @@ var game_go = (function(_super) {
 		x = Math.max(Math.min(x, this.setting.size - 1), 0);
 		y = Math.max(Math.min(y, this.setting.size - 1), 0);
 		if(this.core.cmd('set', player, [x, y])) {
-			this.send('set', [x, y], player);
 			this.player_swap();
 			this.update_capture();
+			this.send('set', [x, y], player);
 		}
 	};
 	game_go.prototype._cmd2data = function(args) {
