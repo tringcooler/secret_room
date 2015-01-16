@@ -305,7 +305,6 @@ var game_go = (function(_super) {
 			this.player('black');
 		} else {
 			this._strict = false;
-			this.player('black');
 		}
 		this._game_init($('#board_size', this.element).val());
 		this.update_capture();
@@ -323,15 +322,16 @@ var game_go = (function(_super) {
 		};
 	};
 	game_go.prototype._on_click = function(e) {
-		if(this._strict && this.player() != this._player) return;
+		var player = this.player();
+		if(this._strict && player != this._player) return;
 		var x = (((e.offsetX - this.setting.first) / this.setting.dist + 0.5) | 0);
 		var y = (((e.offsetY - this.setting.first) / this.setting.dist + 0.5) | 0);
 		x = Math.max(Math.min(x, this.setting.size - 1), 0);
 		y = Math.max(Math.min(y, this.setting.size - 1), 0);
-		if(this.core.cmd('set', this.player(), [x, y])) {
+		if(this.core.cmd('set', player, [x, y])) {
+			this.send('set', [x, y], player);
 			this.player_swap();
 			this.update_capture();
-			this.send('set', [x, y]);
 		}
 	};
 	game_go.prototype._cmd2data = function(args) {
@@ -392,6 +392,7 @@ var game_go = (function(_super) {
 		this._recv_seq = data.seq;
 		switch(data.cmd) {
 			case 'set':
+				this.player(data.args[1]);
 				this.core.cmd('set', this.player(), data.args[0]);
 				this.player_swap();
 				this.update_capture();
