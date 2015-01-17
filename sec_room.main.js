@@ -40,7 +40,7 @@ var pipe_net = (function() {
 				}
 			}
 		}
-		for(id in _trig_list) {
+		for(var id in _trig_list) {
 			for(var i = 0; i < this._id_hooks[id].length; i++) {
 				this._id_hooks[id][i](info, _trig_list[id], tags);
 			}
@@ -81,7 +81,7 @@ var pipe_net = (function() {
 	};
 	pipe_net.prototype.unreg = function(id) {
 		if(!this._id_hooks.hasOwnProperty(id)) return;
-		for(tag in this._tag_hooks) {
+		for(var tag in this._tag_hooks) {
 			this._remove_tag(id, tag);
 		}
 		delete this._id_hooks[id];
@@ -218,7 +218,7 @@ var comp_base = (function() {
 					this.intf[conf.name].style_lock = false;
 			}
 			if(!this.intf[conf.name].style_lock) {
-				for(rule in conf.styl) {
+				for(var rule in conf.styl) {
 					this.intf[conf.name].style.set_style(rule, conf.styl[rule]);
 				}
 			}
@@ -439,6 +439,7 @@ var comp_peer = (function(_super) {
 	};
 	comp_peer.prototype._init = function() {
 		this._lock_cb = null;
+		this._shake_cbs = {};
 		this.conns = {};
 		this.peer = new Peer({
 			key: '9lay1kbtfpvf5hfr',
@@ -470,20 +471,11 @@ var comp_peer = (function(_super) {
 					return;
 				}
 				this._connect(c);
-				this.send_token(c, 'rename', this.peer_id, this.username());
+				this.send_token(c, 'handshake', this.peer_id, this.username());
 			}).bind(this));
 		}).bind(this));
 		$('#peer_connect', this.element).click((function() {
-			var peer_id = $('#peer_dest_id', this.element).val();
-			var username = this.username();
-			if(this.conns.hasOwnProperty(peer_id)) return;
-			var c = this.peer.connect(peer_id, {
-				"metadata": username,
-				"serialization": "json",
-			});
-			c.on('open', (function() {
-				this._connect(c);
-			}).bind(this));
+			this._connect_to($('#peer_dest_id', this.element).val());
 		}).bind(this));
 		this.pipe.reg(this._send.bind(this), 'peer_pipe');
 		this.pipe.add_tags('peer_pipe', 'peer_send');
@@ -499,6 +491,17 @@ var comp_peer = (function(_super) {
 		} else {
 			return $('#peer_username', this.element).attr('readonly', 'readonly').val();
 		}
+	};
+	comp_peer.prototype._connect_to = function(peer_id) {
+		var username = this.username();
+		if(this.conns.hasOwnProperty(peer_id)) return;
+		var c = this.peer.connect(peer_id, {
+			"metadata": username,
+			"serialization": "json",
+		});
+		c.on('open', (function() {
+			this._connect(c);
+		}).bind(this));
 	};
 	comp_peer.prototype._connect = function(c) {
 		var peer_id = c.peer;
@@ -577,10 +580,34 @@ var comp_peer = (function(_super) {
 	comp_peer.prototype._token = function(data) {
 		var rslt;
 		switch(data.cmd) {
+			case 'handshake':
 			case 'rename':
+				/* handshake: peer_id, username */
 				/* rename: peer_id, username */
 				this.conns[data.args[0]].username = data.args[1];
 				this.conns[data.args[0]].element.attr('value', data.args[1]);
+				if(data.cmd == 'handshake') {
+					for(var k in this._shake_cbs) {
+						if(this._shake_cbs[k] && !this._shake_cbs[k](data.args[0], data.args[1]))
+							delete this._shake_cbs[k];
+					}
+				}
+				break;
+			case 'onshake':
+				/* only for local pipe call */
+				/* onshake: reason [callback force=true] */
+				/* callback: peer_id username -> false/true (once/always)*/
+				var reason = data.args[0];
+				var cb = null;
+				var force = true
+				if(data.args.length > 1) cb = data.args[1];
+				if(data.args.length > 2) force = data.args[2];
+				if(!this._shake_cbs.hasOwnProperty(reason) || force) {
+					if(cb)
+						this._shake_cbs[reason] = cb;
+					else
+						delete this._shake_cbs[reason];
+				}
 				break;
 			case 'username':
 				rslt = this.username();
@@ -590,6 +617,7 @@ var comp_peer = (function(_super) {
 				$('#peer_connect', this.element).removeAttr('disabled');
 				break;
 			case 'lock':
+				/* only for local pipe call */
 				/* lock: [callback] */
 				/* callback: peer_id -> false/true (unlock/not)*/
 				if(data.args && data.args[0])
@@ -610,6 +638,10 @@ var comp_peer = (function(_super) {
 				break;
 			case 'count':
 				rslt = Object.keys(this.conns).length + 1;
+				break;
+			case 'connect':
+				/* connect: peer_id */
+				this._connect_to(data.args[0]);
 				break;
 			default:
 				break;
