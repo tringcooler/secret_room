@@ -141,6 +141,16 @@ var game_go = (function(_super) {
 					"chld": [{
 						"name": "span",
 						"elem": "span",
+						"attr": {
+							"id": "info_title",
+						},
+					}],
+				}, {
+					"name": "div",
+					"elem": "div",
+					"chld": [{
+						"name": "span",
+						"elem": "span",
 						"text": "Black Capture:",
 					}, {
 						"name": "span",
@@ -303,8 +313,10 @@ var game_go = (function(_super) {
 			$('#player_white', this.element).attr('disabled', 'disabled');
 			this._player = this.player();
 			this.player('black');
+			$('#info_title', this.element).text('Player: ' + this._player);
 		} else {
 			this._strict = false;
+			$('#info_title', this.element).text('Practise');
 		}
 		this._game_init($('#board_size', this.element).val());
 		this.update_capture();
@@ -344,19 +356,42 @@ var game_go = (function(_super) {
 	game_go.prototype._peer_cmd = function() {
 		return this.pipe.quick(this._cmd2data(arguments), 'peer_cmd', 'peer_cmd_result')[0]
 	}
+	game_go.prototype._peer_lock = function() {
+		var retry = 0;
+		return this._peer_cmd('lock', (function(pid) {
+			if(this._started && this._host) {
+				if(retry > 5) {
+					this.pipe.send('Error: Reconnect faild (Out of time).', 'console_info');
+					return false;
+				}
+				this._peer_cmd('onshake', 'reconnect', (function(pid, user) {
+					this.pipe.send({
+						"cmd": "reconnect",
+						"send_seq": this._send_seq,
+						"recv_seq": this._recv_seq,
+					}, ['peersend_go_cmd', 'peerid_all', 'peer_send']);
+					retry = 0;
+				}).bind(this), false);
+				this._peer_cmd('connect', pid);
+				retry++;
+				return true;
+			}
+		}).bind(this));
+	};
 	game_go.prototype._peer_init = function() {
 		if(this._peer_cmd('count') > 2) {
 			this.pipe.send('This game is only for 2 players.', 'console_info');
 			return false;
 		}
-		peers = this._peer_cmd('lock');
+		var peers = this._peer_lock();
 		if(peers.cnt == 1) {
 			this._remote = false;
 			return true;
 		}
 		this._remote = true;
 		this._started = true;
-		this._send_seq = 1;
+		this._host = true;
+		this._send_seq = 0;
 		this._recv_seq = 0;
 		this.pipe.reg(this._recv_cb.bind(this), 'go_game_channel');
 		this.pipe.add_tags('go_game_channel', 'peerrecv_go_game');
@@ -376,7 +411,13 @@ var game_go = (function(_super) {
 					$('#strict_mode', this.element).prop('checked', data.strict);
 					this.player(data.player);
 					this._start();
+					this._host = false;
 				}
+				break;
+			case 'reconnect':
+				if(data.send_seq != this._recv_seq || data.recv_seq != this._send_seq)
+					this.pipe.send('Error: Reconnect with invalid Sequence.', 'console_info');
+				this._peer_lock();
 				break;
 			default:
 				break;
@@ -384,7 +425,7 @@ var game_go = (function(_super) {
 	};
 	game_go.prototype.send = function() {
 		var data = this._cmd2data(arguments);
-		data.seq = this._send_seq++;
+		data.seq = ++this._send_seq;
 		this.pipe.send(data, ['peersend_go_game', 'peerid_all', 'peer_send']);
 	};
 	game_go.prototype._recv_cb = function(data, pure_tags, ext_tags) {
