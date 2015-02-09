@@ -721,6 +721,7 @@ var core_go = (function() {
 					this._undo(log);
 					rslt = log.stone;
 				}
+				break;
 			default:
 				break;
 		};
