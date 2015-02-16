@@ -677,7 +677,7 @@ $(document).ready(function() {
 	var pipe = new pipe_net();
 	var obj1 = new comp_peer(sht, pipe);
 	var obj2 = new comp_chat_2(sht, pipe);
-	var obj3 = new game_test(sht, pipe);
+	var obj3 = new game_go(sht, pipe);
 	$('body').append(obj1.element).append(obj2.element.css('float', 'right')).append(obj3.element);
 	console.log('done');
 	t = obj3;
