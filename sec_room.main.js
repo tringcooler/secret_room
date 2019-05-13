@@ -442,7 +442,7 @@ var comp_peer = (function(_super) {
 		this._shake_cbs = {};
 		this.conns = {};
 		this.peer = new Peer({
-			key: '9lay1kbtfpvf5hfr',
+			//key: '9lay1kbtfpvf5hfr',
 			debug: 3,
 			logFunction: (function() {
 				var copy = Array.prototype.slice.call(arguments).join(' ');
